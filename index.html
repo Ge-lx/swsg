@@ -1,0 +1,117 @@
+<html>
+<head>
+    <meta http-equiv="Content-type" content="text/html; charset=utf-8">
+    <script type="text/javascript" src="https://ge-lx.github.io/bunch/bunch.js"></script>
+    <script type="text/javascript" src="https://ge-lx.github.io/bunch/bnc.js"></script>
+    <title>Tone Generator</title>
+
+<script>
+
+    let setFreq = () => {};
+    let setAmpl = () => {};
+
+    (function ({ define, bnc, Observable }) {
+
+        define('config', () => {
+            return {
+                waveType: 'sine'
+            };
+        });
+
+        let context = null;
+        let oscillators$ = Observable([]);
+        let initial$ = Observable(true);
+
+        define('controls', (config) => {
+            
+            const Oscillator = function (freq, ampl) {
+
+                const osc = context.createOscillator();
+                const vol = context.createGain();
+                osc.type = config.waveType;
+
+                osc.connect(vol);
+                vol.connect(context.destination)
+
+                const Oscillator = {
+                    get freq () {
+                        return osc.frequency.value;
+                    },
+                    get ampl () {
+                        return vol.gain.value;
+                    },
+                    set freq (val) {
+                        osc.frequency.value = val;
+                    },
+                    set ampl (val) {
+                        vol.gain.value = val;
+                    },
+                    start: () => osc.start(0),
+                    stop: () => osc.stop()
+                };
+
+                Oscillator.freq = freq;
+                Oscillator.ampl = ampl;
+                Oscillator.start();
+
+                return Oscillator;
+            };
+
+
+            function addOscillator (freq, ampl) {
+                oscillators$.value.push(Oscillator(freq, ampl));
+                oscillators$.trigger();
+            };
+
+
+            setFreq = (idx, value) => {
+                oscillators$.value[idx].freq = value;
+            };
+
+            setAmpl = (idx, value) => {
+                oscillators$.value[idx].ampl = value;
+            };
+
+            return {
+                oscillators$,
+                initial$,
+                addOscillator,
+                createContext: () => {
+                    console.log('Creating Web Audio Context');
+                    context = new AudioContext();
+                    addOscillator(0, 1); // 0th index wont work, bnc_attr needs work
+                    addOscillator(220, 1);
+                    initial$.value = false;
+                }
+            };
+        });
+    }(bnc_bunch));
+
+</script>
+</head>
+
+<body>
+    <bnc-root>
+        <bnc-module name="controls" id="audioControls">
+            <h2>HTML5 Web Audio Oscillators<h2>
+
+            <button bnc-if="initial$" bnc-click="createContext()">Start</button>
+            <button bnc-click="addOscillator(440, 1)">Add Oscillator</button>
+
+            <div bnc-for="idx, oscillator in oscillators$">
+                <div bnc-if="idx" class="oscillator">
+                    <span bnc-bind="idx"></span>
+                    <input id="freqRange" type="range" min="0" max="1760" value="440"
+                        bnc-attr="idx: idx"
+                        oninput="setFreq(this.getAttribute('idx'), this.value)"
+                    />
+                    <input id="freqRange" type="range" step="0.1" min="0" max="1" value="440"
+                        bnc-attr="idx: idx"
+                        oninput="setAmpl(this.getAttribute('idx'), this.value)"
+                    />
+                </div>
+            </div>
+        </div>
+    </bnc-root>
+</body>
+</html>
