@@ -2,116 +2,162 @@
 <head>
     <meta http-equiv="Content-type" content="text/html; charset=utf-8">
     <script type="text/javascript" src="https://ge-lx.github.io/bunch/bunch.js"></script>
-    <script type="text/javascript" src="https://ge-lx.github.io/bunch/bnc.js"></script>
+    <script type="text/javascript" src="../bunch/bnc.js"></script>
     <title>Tone Generator</title>
 
 <script>
-
-    let setFreq = () => {};
-    let setAmpl = () => {};
-
-    (function ({ define, bnc, Observable }) {
+    (function ({ define, bnc, Observable, ComputedObservable }) {
 
         define('config', () => {
             return {
-                waveType: 'sine'
+                freq: {
+                    label: 'FREQ',
+                    min: 20,
+                    max: 20 * 1000,
+                    step: 1,
+                    initialValue: 220
+                },
+                ampl: {
+                    label: 'AMP',
+                    min: 0,
+                    max: 1,
+                    step: 0.02,
+                    initialValue: 0.4
+                },
+                waveTypes: ['sine', 'square', 'sawtooth', 'triangle']
             };
         });
 
-        let context = null;
-        let oscillators$ = Observable([]);
-        let initial$ = Observable(true);
 
-        define('controls', (config) => {
-            
-            const Oscillator = function (freq, ampl) {
+        define('setup', () => {
+            const stateName$ = Observable('state_inactive');
 
+
+            const createWebContext = () => {
+                const context = new AudioContext();
+                define('context', () => {
+                    return context;
+                });
+                stateName$.value = 'state_active';
+            };
+
+            return {
+                stateName$,
+                createWebContext
+            };
+        });
+
+        define('state_inactive', (setup) => {
+            return {
+                $template: `
+                    <div class="inactive_holder">
+                        <img src="inactive.png">
+                        <button bnc-click="start()">Start (and enable Web Audio API)</button>
+                    </div>
+                `,
+                start: () => setup.createWebContext()
+            };
+        });
+
+        define('state_active', (oscillator) => {
+            const active_oscillators$ = Observable([]);
+
+            const addOscillator = () => {
+                active_oscillators$.value.push(oscillator());
+                active_oscillators$.trigger();
+            };
+
+            return {
+                $template: `
+                    <div class="state_active">
+                        <button bnc-click="addOscillator()">Add Oscillator</button>
+                        <div class="oscillators" bnc-for="oscillator in active_oscillators$">
+                            <div>
+                                <bnc-element name="element_oscillator" data="oscillator"></bnc-element>
+                            </div>
+                        </div>
+                    </div>
+                `,
+                active_oscillators$,
+                addOscillator
+            }
+        });
+    
+        define('oscillator', (context, config) => {
+            return () => {
+                // Setup Oscillator
                 const osc = context.createOscillator();
                 const vol = context.createGain();
-                osc.type = config.waveType;
 
                 osc.connect(vol);
                 vol.connect(context.destination)
 
-                const Oscillator = {
-                    get freq () {
-                        return osc.frequency.value;
-                    },
-                    get ampl () {
-                        return vol.gain.value;
-                    },
-                    set freq (val) {
-                        osc.frequency.value = val;
-                    },
-                    set ampl (val) {
-                        vol.gain.value = val;
-                    },
-                    start: () => osc.start(0),
-                    stop: () => osc.stop()
-                };
+                // Setup UI state variables
+                const waveType$ = Observable(config.waveTypes[0]);
+                const freq$ = Observable(config.freq.initialValue);
+                const ampl$ = Observable(config.ampl.initialValue);
+                const running$ = Observable(true);
 
-                Oscillator.freq = freq;
-                Oscillator.ampl = ampl;
-                Oscillator.start();
+                // React to changes from UI state
+                waveType$.stream((type) => osc.type = type);
+                freq$.stream((freq) => osc.frequency.value = freq);
+                ampl$.stream((ampl) => vol.gain.value = ampl);
+                running$.stream((running) => running ? osc.start(0) : osc.stop());
 
-                return Oscillator;
-            };
-
-
-            function addOscillator (freq, ampl) {
-                oscillators$.value.push(Oscillator(freq, ampl));
-                oscillators$.trigger();
-            };
-
-
-            setFreq = (idx, value) => {
-                oscillators$.value[idx].freq = value;
-            };
-
-            setAmpl = (idx, value) => {
-                oscillators$.value[idx].ampl = value;
-            };
-
-            return {
-                oscillators$,
-                initial$,
-                addOscillator,
-                createContext: () => {
-                    console.log('Creating Web Audio Context');
-                    context = new AudioContext();
-                    addOscillator(0, 1); // 0th index wont work, bnc_attr needs work
-                    addOscillator(220, 1);
-                    initial$.value = false;
-                }
+                return { running$, freq$, ampl$, waveType$ };
             };
         });
-    }(bnc_bunch));
 
+        define('element_oscillator', (context, config) => {
+            return ({ running$, freq$, ampl$, waveType$ }) => {
+                return {
+                    $template: `
+                        <div class="oscillator">
+                            <div class="oscillator_header">
+                                <span bnc-bind="waveType$"></span>
+                            </div>
+                        
+                            <bnc-element name="element_slider" data="({ value$: freq$, ...config.freq })">
+                            <bnc-element name="element_slider" data="({ value$: ampl$, ...config.ampl })">
+                            <button bnc-click="toggleRunning()" bnc-bind="toggleLabel$"></button>
+                        </div>
+                    `,
+                    config,
+                    waveType$, freq$, ampl$,
+                    toggleRunning: () => running$.value = !running$.value,
+                    toggleLabel$: ComputedObservable([running$], running => running ? 'STOP' : 'START')
+                };
+            };
+        });
+
+        define('element_slider', function () {
+            return ({ min, max, step, label, value$ }) => {
+                return {
+                    $template: `
+                        <div class="slider">
+                            <h5 bnc-bind="label"></h5>
+                            <span bnc-bind="value$"></span>
+                            <input type="range" bnc-attr="min: min, max: max, step: step" bnc-model="value$"></input>
+                        </div>
+                    `,
+                    $link: ($scope, element) => { },
+                    value$,
+                    min, max, label, step
+                };
+            };
+        });
+
+    }(bnc_bunch));
 </script>
 </head>
 
 <body>
     <bnc-root>
-        <bnc-module name="controls" id="audioControls">
-            <h2>HTML5 Web Audio Oscillators<h2>
+        <h2>HTML5 Web Audio Oscillators<h2>
 
-            <button bnc-if="initial$" bnc-click="createContext()">Start</button>
-            <button bnc-click="addOscillator(440, 1)">Add Oscillator</button>
-
-            <div bnc-for="idx, oscillator in oscillators$">
-                <div bnc-if="idx" class="oscillator">
-                    <span bnc-bind="idx"></span>
-                    <input id="freqRange" type="range" min="0" max="1760" value="440"
-                        bnc-attr="idx: idx"
-                        oninput="setFreq(this.getAttribute('idx'), this.value)"
-                    />
-                    <input id="freqRange" type="range" step="0.1" min="0" max="1" value="440"
-                        bnc-attr="idx: idx"
-                        oninput="setAmpl(this.getAttribute('idx'), this.value)"
-                    />
-                </div>
-            </div>
-        </div>
+        <bnc-module name="setup">
+            <bnc-state name="stateName$"></bnc-state>
+        </bnc-module>
     </bnc-root>
 </body>
 </html>
